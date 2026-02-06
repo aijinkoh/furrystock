@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>库存助手 V5 - 分类导出版</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f0f2f5; padding-bottom: 80px; font-size: 14px; }
+        .tab-content { display: none; padding: 12px; }
+        .active-tab { display: block; }
+        .card { border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 15px; }
+        .item-row { background: #fff; padding: 12px; border-left: 5px solid #0d6efd; margin-bottom: 8px; position: relative; border-radius: 8px; }
+        .sales-row { border-left-color: #198754; }
+        .btn-remove { position: absolute; right: 5px; top: 5px; color: #dc3545; padding: 2px 8px; font-size: 16px; }
+        .nav-fixed-bottom { position: fixed; bottom: 0; width: 100%; background: #fff; border-top: 1px solid #eee; display: flex; padding: 8px 0; z-index: 1001; }
+        .nav-item { text-align: center; color: #888; text-decoration: none; flex: 1; font-size: 11px; }
+        .nav-item.active { color: #0d6efd; font-weight: bold; }
+        .nav-icon { font-size: 20px; display: block; margin-bottom: 2px; }
+        .history-card { border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #fff; }
+        .history-header { display: flex; justify-content: space-between; border-bottom: 1px dashed #eee; padding-bottom: 5px; margin-bottom: 8px; }
+        .history-detail { font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand navbar-dark bg-dark sticky-top">
+    <div class="container-fluid">
+        <span class="navbar-brand">库存 V5</span>
+        <div class="navbar-nav ms-auto">
+            <div class="dropdown">
+                <button class="btn btn-outline-info btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">导出</button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="#" onclick="exportType('purchase')">导出采购清单 (CSV)</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="exportType('sales')">导出销售清单 (CSV)</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" onclick="exportType('all')">导出全量备份 (用于导入)</a></li>
+                </ul>
+            </div>
+            <button class="btn btn-outline-warning btn-sm ms-2" onclick="document.getElementById('importFile').click()">导入</button>
+            <input type="file" id="importFile" accept=".csv" onchange="importData(this)" style="display:none">
+        </div>
+    </div>
+</nav>
+
+<!-- 1. 采购录入 -->
+<div id="purchase" class="tab-content active-tab">
+    <div class="card p-3">
+        <label class="form-label fw-bold">采购日期</label>
+        <input type="date" class="form-control mb-3" id="pDate">
+        <div id="pItemsContainer"></div>
+        <button class="btn btn-outline-primary btn-sm w-100 mb-3" onclick="addPurchaseRow()">+ 添加货品</button>
+        <button class="btn btn-primary w-100 py-2" onclick="savePurchase()">保存整笔采购</button>
+    </div>
+</div>
+
+<!-- 2. 销售录入 -->
+<div id="sales" class="tab-content">
+    <div class="card p-3">
+        <div class="row g-2 mb-3">
+            <div class="col-6"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="sDate"></div>
+            <div class="col-6"><label class="form-label fw-bold">订单 ID</label><input type="text" class="form-control" id="sOrderId" placeholder="选填"></div>
+        </div>
+        <div id="sItemsContainer"></div>
+        <button class="btn btn-outline-success btn-sm w-100 mb-3" onclick="addSalesRow()">+ 添加货品</button>
+        <div class="row g-2 mb-3 pt-2 border-top">
+            <div class="col-6"><label class="form-label">总优惠</label><input type="number" step="0.01" class="form-control" id="sTotalCoupon" value="0"></div>
+            <div class="col-6"><label class="form-label">手续费</label><input type="number" step="0.01" class="form-control" id="sTotalFee" value="0"></div>
+        </div>
+        <button class="btn btn-success w-100 py-2" onclick="saveSales()">确认结单</button>
+    </div>
+</div>
+
+<!-- 3. 历史记录 -->
+<div id="history" class="tab-content">
+    <div class="btn-group w-100 mb-3 shadow-sm">
+        <input type="radio" class="btn-check" name="histType" id="histP" checked onchange="renderHistory()">
+        <label class="btn btn-outline-primary" for="histP">采购记录</label>
+        <input type="radio" class="btn-check" name="histType" id="histS" onchange="renderHistory()">
+        <label class="btn btn-outline-success" for="histS">销售历史</label>
+    </div>
+    <div id="historyList"></div>
+</div>
+
+<!-- 4. 实时库存 -->
+<div id="inventory" class="tab-content">
+    <div class="row g-2 mb-3">
+        <div class="col-6"><select class="form-select" id="filterYear" onchange="renderInventory()"></select></div>
+        <div class="col-6"><select class="form-select" id="filterMonth" onchange="renderInventory()"></select></div>
+    </div>
+    <div class="table-responsive bg-white rounded shadow-sm">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="table-light"><tr><th>名称</th><th class="text-center">初</th><th class="text-center">进</th><th class="text-center">销</th><th class="text-center">余</th></tr></thead>
+            <tbody id="inventoryTable"></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="nav-fixed-bottom">
+    <a href="javascript:void(0)" class="nav-item active" onclick="showTab('purchase', this)"><span class="nav-icon">📦</span>进货</a>
+    <a href="javascript:void(0)" class="nav-item" onclick="showTab('sales', this)"><span class="nav-icon">💰</span>出货</a>
+    <a href="javascript:void(0)" class="nav-item" onclick="showTab('history', this)"><span class="nav-icon">📜</span>记录</a>
+    <a href="javascript:void(0)" class="nav-item" onclick="showTab('inventory', this)"><span class="nav-icon">📊</span>库存</a>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const products = ["Keychain RM1", "Keychain RM2", "Keychain RM3", "Plush RM1", "Plush RM2", "Plush RM3", "Plush RM5", "Plush RM10", "Plush RM15", "Plush RM20", "Figurine & Toy RM3", "Figurine & Toy RM6", "Figurine & Toy RM10", "Figurine & Toy RM15", "Stationary RM0.6", "Stationary RM1", "Stationary RM2", "Stationary RM3", "Handkechief RM1", "Handkechief RM2", "Handkechief RM3", "Bag RM1", "Bag RM2", "Bag RM3", "Bag RM6", "Others RM3", "Others RM6"];
+
+let purchases = JSON.parse(localStorage.getItem('v5_purchases')) || [];
+let sales = JSON.parse(localStorage.getItem('v5_sales')) || [];
+let initialStock = JSON.parse(localStorage.getItem('v5_initialStock')) || {};
+
+function showTab(id, el) {
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active-tab'));
+    document.getElementById(id).classList.add('active-tab');
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    el.classList.add('active');
+    if(id === 'inventory') renderInventory();
+    if(id === 'history') renderHistory();
+}
+
+// --- 动态行 ---
+function addPurchaseRow() {
+    const id = Date.now() + Math.random();
+    document.getElementById('pItemsContainer').insertAdjacentHTML('beforeend', `<div class="item-row card" id="pRow_${id}">
+        <button class="btn btn-remove" onclick="this.parentElement.remove()">✕</button>
+        <select class="form-select form-select-sm mb-2 p-item">${products.map(p => `<option value="${p}">${p}</option>`).join('')}</select>
+        <div class="row g-2">
+            <div class="col-4"><input type="number" step="0.01" class="form-control form-control-sm p-price" placeholder="价"></div>
+            <div class="col-4"><input type="number" class="form-control form-control-sm p-qty" placeholder="量"></div>
+            <div class="col-4 d-flex align-items-center small"><input type="checkbox" class="p-bag me-1">+0.2</div>
+        </div>
+    </div>`);
+}
+
+function addSalesRow() {
+    const id = Date.now() + Math.random();
+    document.getElementById('sItemsContainer').insertAdjacentHTML('beforeend', `<div class="item-row sales-row card" id="sRow_${id}">
+        <button class="btn btn-remove" onclick="this.parentElement.remove()">✕</button>
+        <select class="form-select form-select-sm mb-2 s-item">${products.map(p => `<option value="${p}">${p}</option>`).join('')}</select>
+        <div class="row g-2">
+            <div class="col-6"><input type="number" step="0.01" class="form-control form-control-sm s-price" placeholder="金额"></div>
+            <div class="col-6"><input type="number" class="form-control form-control-sm s-qty" placeholder="数量"></div>
+        </div>
+    </div>`);
+}
+
+// --- 保存 ---
+function savePurchase() {
+    const date = document.getElementById('pDate').value, batchId = Date.now(), rows = document.querySelectorAll('#pItemsContainer .item-row');
+    if(!date || rows.length === 0) return alert('日期或商品不能为空');
+    rows.forEach(row => {
+        const item = row.querySelector('.p-item').value, price = parseFloat(row.querySelector('.p-price').value) || 0, qty = parseInt(row.querySelector('.p-qty').value) || 0, bag = row.querySelector('.p-bag').checked;
+        if(qty > 0) purchases.push({ batchId, date, item, qty, price: bag?price+0.2:price, cost: ((bag?price+0.2:price)*qty).toFixed(2) });
+    });
+    localStorage.setItem('v5_purchases', JSON.stringify(purchases));
+    document.getElementById('pItemsContainer').innerHTML = ''; alert('采购记录已存');
+}
+
+function saveSales() {
+    const date = document.getElementById('sDate').value, orderId = document.getElementById('sOrderId').value || 'ID-'+Date.now(), batchId = Date.now(), coupon = parseFloat(document.getElementById('sTotalCoupon').value) || 0, fee = parseFloat(document.getElementById('sTotalFee').value) || 0;
+    const rows = document.querySelectorAll('#sItemsContainer .item-row');
+    if(!date || rows.length === 0) return alert('数据不能为空');
+    rows.forEach(row => {
+        const item = row.querySelector('.s-item').value, amount = parseFloat(row.querySelector('.s-price').value) || 0, qty = parseInt(row.querySelector('.s-qty').value) || 0;
+        if(qty > 0) sales.push({ batchId, date, orderId, item, qty, amount, coupon, fee });
+    });
+    localStorage.setItem('v5_sales', JSON.stringify(sales));
+    document.getElementById('sItemsContainer').innerHTML = ''; alert('销售订单已录入');
+}
+
+// --- 历史与库存 ---
+function renderHistory() {
+    const list = document.getElementById('historyList'), isP = document.getElementById('histP').checked, data = isP ? purchases : sales, groups = {};
+    list.innerHTML = '';
+    data.forEach(d => { if(!groups[d.batchId]) groups[d.batchId] = []; groups[d.batchId].push(d); });
+    Object.keys(groups).sort((a,b) => b-a).forEach(id => {
+        const items = groups[id], first = items[0];
+        let subTotal = items.reduce((s, i) => s + parseFloat(isP ? i.cost : i.amount), 0);
+        let final = isP ? subTotal : (subTotal - first.coupon - first.fee);
+        list.innerHTML += `<div class="history-card shadow-sm border-start border-4 ${isP?'border-primary':'border-success'}">
+            <div class="history-header"><span class="fw-bold">${first.date}</span><span class="badge ${isP?'bg-primary':'bg-success'}">RM ${final.toFixed(2)}</span></div>
+            <div class="history-detail mb-2">
+                ${!isP ? `单号: ${first.orderId}<br>` : ''}
+                ${items.map(i => `· ${i.item} x ${i.qty} (RM${isP?i.cost:i.amount})`).join('<br>')}
+                ${!isP && (first.coupon>0||first.fee>0) ? `<div class="text-danger border-top mt-1 pt-1">优惠:-${first.coupon} | 手续费:-${first.fee}</div>` : ''}
+            </div>
+            <button class="btn btn-outline-danger btn-sm w-100" onclick="deleteBatch('${id}', ${isP})">删除此记录</button>
+        </div>`;
+    });
+}
+
+function deleteBatch(id, isP) {
+    if(!confirm("确定删除？")) return;
+    if(isP) { purchases = purchases.filter(p => p.batchId != id); localStorage.setItem('v5_purchases', JSON.stringify(purchases)); }
+    else { sales = sales.filter(s => s.batchId != id); localStorage.setItem('v5_sales', JSON.stringify(sales)); }
+    renderHistory();
+}
+
+function renderInventory() {
+    const y = document.getElementById('filterYear').value, m = document.getElementById('filterMonth').value, tbody = document.getElementById('inventoryTable');
+    tbody.innerHTML = '';
+    products.forEach(name => {
+        const tin = purchases.filter(p => { const d = new Date(p.date); return p.item === name && d.getFullYear() == y && (m === 'all' || d.getMonth() == m); }).reduce((s, p) => s + p.qty, 0);
+        const tout = sales.filter(s => { const d = new Date(s.date); return s.item === name && d.getFullYear() == y && (m === 'all' || d.getMonth() == m); }).reduce((s, s1) => s + s1.qty, 0);
+        const init = initialStock[name] || 0;
+        tbody.innerHTML += `<tr><td style="font-size:11px">${name}</td><td class="text-center text-primary" onclick="editInitial('${name}')">${init}</td><td class="text-center text-success">${tin}</td><td class="text-center text-danger">${tout}</td><td class="text-center fw-bold">${init+tin-tout}</td></tr>`;
+    });
+}
+
+function editInitial(name) {
+    const val = prompt(`初始库存 ${name}:`, initialStock[name] || 0);
+    if(val !== null) { initialStock[name] = parseInt(val) || 0; localStorage.setItem('v5_initialStock', JSON.stringify(initialStock)); renderInventory(); }
+}
+
+// --- 增强导出逻辑 ---
+function exportType(type) {
+    let csv = "\uFEFF";
+    let filename = "";
+
+    if (type === 'purchase') {
+        filename = `采购清单_${new Date().toLocaleDateString()}.csv`;
+        csv += "日期,货品名称,单价(含纸袋),采购数量,总费用\n";
+        purchases.forEach(p => {
+            csv += `${p.date},${p.item},${p.price},${p.qty},${p.cost}\n`;
+        });
+    } else if (type === 'sales') {
+        filename = `销售清单_${new Date().toLocaleDateString()}.csv`;
+        csv += "日期,订单ID,货品名称,数量,原价金额,订单总优惠,订单手续费,到手最终金额(整单)\n";
+        sales.forEach(s => {
+            const final = (s.amount - s.coupon - s.fee).toFixed(2);
+            csv += `${s.date},${s.orderId},${s.item},${s.qty},${s.amount},${s.coupon},${s.fee},${final}\n`;
+        });
+    } else if (type === 'all') {
+        // 保持原有的全量备份格式，以便导入
+        filename = `全量备份_V5_${new Date().toISOString().slice(0,10)}.csv`;
+        csv += "SECTION,DATA1,DATA2,DATA3,DATA4,DATA5,DATA6,DATA7,BATCHID\n";
+        Object.keys(initialStock).forEach(k => csv += `INIT,${k},${initialStock[k]},,,,,,,\n`);
+        purchases.forEach(p => csv += `PURCHASE,${p.date},${p.item},${p.qty},${p.price},${p.cost},,,,${p.batchId}\n`);
+        sales.forEach(s => csv += `SALE,${s.date},${s.orderId},${s.item},${s.qty},${s.amount},${s.coupon},${s.fee},${s.batchId}\n`);
+    }
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+}
+
+function importData(input) {
+    const file = input.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const lines = e.target.result.split('\n'); if(!confirm("恢复数据将覆盖当前所有记录，确定吗？")) return;
+        purchases = []; sales = []; initialStock = {};
+        lines.forEach((line, index) => {
+            if(index === 0 || !line.trim()) return;
+            const c = line.split(','); const type = c[0];
+            if(type === 'INIT') initialStock[c[1]] = parseInt(c[2]);
+            if(type === 'PURCHASE') purchases.push({date:c[1], item:c[2], qty:parseInt(c[3]), price:parseFloat(c[4]), cost:c[5], batchId:c[9]||Date.now()});
+            if(type === 'SALE') sales.push({date:c[1], orderId:c[2], item:c[3], qty:parseInt(c[4]), amount:parseFloat(c[5]), coupon:parseFloat(c[6]), fee:parseFloat(c[7]), batchId:c[8]||Date.now()});
+        });
+        localStorage.setItem('v5_purchases', JSON.stringify(purchases));
+        localStorage.setItem('v5_sales', JSON.stringify(sales));
+        localStorage.setItem('v5_initialStock', JSON.stringify(initialStock));
+        location.reload();
+    };
+    reader.readAsText(file);
+}
+
+window.onload = function() {
+    document.getElementById('pDate').valueAsDate = new Date();
+    document.getElementById('sDate').valueAsDate = new Date();
+    const ySel = document.getElementById('filterYear'), curY = new Date().getFullYear();
+    for(let y=curY; y>=curY-2; y--) ySel.options.add(new Option(y+"年", y));
+    const mSel = document.getElementById('filterMonth');
+    mSel.options.add(new Option("全年实时", "all"));
+    for(let m=0; m<12; m++) mSel.options.add(new Option((m+1)+"月", m));
+    addPurchaseRow(); addSalesRow();
+};
+</script>
+</body>
+</html>
