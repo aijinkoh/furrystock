@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>库存管家 V11 - 精确核算版</title>
+    <title>库存管家 V12 - 平台管理版</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root { --safe-area-inset-bottom: env(safe-area-inset-bottom); }
@@ -28,14 +28,14 @@
         .month-content { display: none; padding: 10px; background: #fdfdfd; }
         .history-card { border-radius: 8px; padding: 10px; margin-bottom: 8px; background: #fff; border: 1px solid #eee; border-left: 4px solid #ddd; }
         th { font-weight: 600; color: #666; background-color: #f8f9fa !important; font-size: 11px; text-align: center; }
-        .small-label { font-size: 11px; color: #666; margin-bottom: 2px; display: block; }
+        .edit-mode-notice { background: #fff3cd; color: #856404; padding: 8px; border-radius: 8px; margin-bottom: 10px; font-size: 12px; display: none; }
     </style>
 </head>
 <body>
 
 <nav class="navbar navbar-expand navbar-dark bg-dark sticky-top">
     <div class="container-fluid">
-        <span class="navbar-brand">库存管家 V11</span>
+        <span class="navbar-brand">库存管家 V12</span>
         <div class="navbar-nav ms-auto">
             <div class="dropdown">
                 <button class="btn btn-outline-info btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">导出</button>
@@ -54,25 +54,41 @@
 
 <!-- 进货录入 -->
 <div id="purchase" class="tab-content active-tab">
+    <div id="pEditNotice" class="edit-mode-notice fw-bold text-center">正在修改记录模式 (原记录将被覆盖)</div>
     <div class="card p-3 shadow-sm">
         <label class="form-label fw-bold small">采购日期</label>
         <input type="date" class="form-control mb-3" id="pDate">
         <div id="pItemsContainer"></div>
         <button class="btn btn-outline-primary btn-sm w-100 mb-3" onclick="addPurchaseRow()">+ 添加货品</button>
         <div class="p-2 bg-light rounded text-center mb-3">
-            <label class="small-label fw-bold">本次采购纸袋数量 (RM0.2/个)</label>
-            <input type="number" class="form-control form-control-sm mx-auto text-center" id="pBagCount" value="0" style="max-width: 100px;">
+            <label class="small-label fw-bold">纸袋数量 (RM0.2/个)</label>
+            <input type="number" class="form-control form-control-sm mx-auto text-center" id="pBagCount" value="0" style="max-width: 80px;">
         </div>
-        <button class="btn btn-primary w-100 py-2" onclick="savePurchase()">保存整笔采购</button>
+        <button class="btn btn-primary w-100 py-2" id="btnSaveP" onclick="savePurchase()">保存整笔采购</button>
+        <button class="btn btn-secondary w-100 py-2 mt-2" id="btnCancelP" onclick="cancelEdit()" style="display:none">取消修改</button>
     </div>
 </div>
 
 <!-- 出货录入 -->
 <div id="sales" class="tab-content">
+    <div id="sEditNotice" class="edit-mode-notice fw-bold text-center">正在修改订单模式 (原记录将被覆盖)</div>
     <div class="card p-3 shadow-sm">
         <div class="row g-2 mb-3">
             <div class="col-6"><label class="form-label fw-bold small">销售日期</label><input type="date" class="form-control" id="sDate"></div>
-            <div class="col-6"><label class="form-label fw-bold small">订单 ID</label><input type="text" class="form-control" id="sOrderId" placeholder="选填"></div>
+            <div class="col-6">
+                <label class="form-label fw-bold small">销售平台</label>
+                <select class="form-select" id="sPlatform">
+                    <option value="Shopee">Shopee</option>
+                    <option value="TikTok">TikTok</option>
+                    <option value="Lazada">Lazada</option>
+                    <option value="Offline">线下销售</option>
+                    <option value="Others">其他</option>
+                </select>
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label fw-bold small">订单 ID / 备注</label>
+            <input type="text" class="form-control" id="sOrderId" placeholder="选填">
         </div>
         <div id="sItemsContainer"></div>
         <button class="btn btn-outline-success btn-sm w-100 mb-3" onclick="addSalesRow()">+ 添加货品</button>
@@ -84,7 +100,8 @@
             <label class="small-label text-success fw-bold">平台金额调整 / 补差价 (+)</label>
             <input type="number" step="0.01" class="form-control border-success" id="sAdjustment" value="0">
         </div>
-        <button class="btn btn-success w-100 py-2" onclick="saveSales()">确认结单</button>
+        <button class="btn btn-success w-100 py-2" id="btnSaveS" onclick="saveSales()">确认结单</button>
+        <button class="btn btn-secondary w-100 py-2 mt-2" id="btnCancelS" onclick="cancelEdit()" style="display:none">取消修改</button>
     </div>
 </div>
 
@@ -128,6 +145,8 @@ let purchases = JSON.parse(localStorage.getItem('v5_purchases')) || [];
 let sales = JSON.parse(localStorage.getItem('v5_sales')) || [];
 let initialStock = JSON.parse(localStorage.getItem('v5_initialStock')) || {};
 
+let editBatchId = null; // 正在编辑的ID
+
 function extractPrice(name) {
     const match = name.match(/RM([\d.]+)/);
     return match ? parseFloat(match[1]) : 0;
@@ -137,80 +156,140 @@ function showTab(id, el) {
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active-tab'));
     document.getElementById(id).classList.add('active-tab');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    el.classList.add('active');
+    if(el) el.classList.add('active');
     if(id === 'inventory') renderInventory();
     if(id === 'history') renderHistory();
 }
 
-// --- 进货 ---
-function addPurchaseRow() {
+// --- 通用行生成 ---
+function addPurchaseRow(data = null) {
     const id = Date.now() + Math.random();
-    const defaultProduct = products[0], defaultPrice = extractPrice(defaultProduct);
+    const item = data ? data.item : products[0];
+    const price = data ? data.price : extractPrice(item);
+    const qty = data ? data.qty : "";
+    
     document.getElementById('pItemsContainer').insertAdjacentHTML('beforeend', `
         <div class="item-row card" id="pRow_${id}">
             <button class="btn btn-remove" onclick="this.parentElement.remove()">✕</button>
             <select class="form-select form-select-sm mb-2 p-item" onchange="this.parentElement.querySelector('.p-price').value = extractPrice(this.value)">
-                ${products.map(p => `<option value="${p}">${p}</option>`).join('')}
+                ${products.map(p => `<option value="${p}" ${p===item?'selected':''}>${p}</option>`).join('')}
             </select>
             <div class="row g-2">
-                <div class="col-6"><div class="input-group input-group-sm"><span class="input-group-text">RM</span><input type="number" step="0.01" class="form-control p-price" value="${defaultPrice}"></div></div>
-                <div class="col-6"><input type="number" class="form-control form-control-sm p-qty" placeholder="数量"></div>
+                <div class="col-6"><div class="input-group input-group-sm"><span class="input-group-text">RM</span><input type="number" step="0.01" class="form-control p-price" value="${price}"></div></div>
+                <div class="col-6"><input type="number" class="form-control form-control-sm p-qty" placeholder="数量" value="${qty}"></div>
             </div>
         </div>`);
 }
 
-function savePurchase() {
-    const date = document.getElementById('pDate').value, batchId = Date.now(), rows = document.querySelectorAll('#pItemsContainer .item-row');
-    const bagQty = parseInt(document.getElementById('pBagCount').value) || 0;
-    
-    if(!date || rows.length === 0) return alert('请检查数据');
-    
-    rows.forEach((row, index) => {
-        const item = row.querySelector('.p-item').value, price = parseFloat(row.querySelector('.p-price').value) || 0, qty = parseInt(row.querySelector('.p-qty').value) || 0;
-        // 纸袋费用平摊到第一项（仅用于记录）
-        const bagCost = (index === 0) ? (bagQty * 0.2) : 0;
-        if(qty > 0) purchases.push({ batchId, date, item, qty, price, cost: (price * qty + bagCost).toFixed(2), bagQty: index === 0 ? bagQty : 0 });
-    });
-    localStorage.setItem('v5_purchases', JSON.stringify(purchases));
-    document.getElementById('pItemsContainer').innerHTML = ''; document.getElementById('pBagCount').value = 0; alert('采购已存入');
-}
-
-// --- 出货 ---
-function addSalesRow() {
+function addSalesRow(data = null) {
     const id = Date.now() + Math.random();
-    const defaultProduct = products[0], defaultPrice = extractPrice(defaultProduct);
+    const item = data ? data.item : products[0];
+    const price = data ? data.unitAmount : extractPrice(item);
+    const qty = data ? data.qty : "";
+
     document.getElementById('sItemsContainer').insertAdjacentHTML('beforeend', `
         <div class="item-row sales-row card" id="sRow_${id}">
             <button class="btn btn-remove" onclick="this.parentElement.remove()">✕</button>
             <select class="form-select form-select-sm mb-2 s-item" onchange="this.parentElement.querySelector('.s-price').value = extractPrice(this.value)">
-                ${products.map(p => `<option value="${p}">${p}</option>`).join('')}
+                ${products.map(p => `<option value="${p}" ${p===item?'selected':''}>${p}</option>`).join('')}
             </select>
             <div class="row g-2">
-                <div class="col-6"><div class="input-group input-group-sm"><span class="input-group-text">RM</span><input type="number" step="0.01" class="form-control s-price" value="${defaultPrice}"></div></div>
-                <div class="col-6"><input type="number" class="form-control form-control-sm s-qty" placeholder="数量"></div>
+                <div class="col-6"><div class="input-group input-group-sm"><span class="input-group-text">RM</span><input type="number" step="0.01" class="form-control s-price" value="${price}"></div></div>
+                <div class="col-6"><input type="number" class="form-control form-control-sm s-qty" placeholder="数量" value="${qty}"></div>
             </div>
         </div>`);
 }
 
+// --- 保存/更新逻辑 ---
+function savePurchase() {
+    const date = document.getElementById('pDate').value, batchId = editBatchId || Date.now(), rows = document.querySelectorAll('#pItemsContainer .item-row');
+    const bagQty = parseInt(document.getElementById('pBagCount').value) || 0;
+    if(!date || rows.length === 0) return alert('日期或商品不能为空');
+    
+    // 如果是编辑模式，先删除旧数据
+    if(editBatchId) purchases = purchases.filter(p => p.batchId != editBatchId);
+    
+    rows.forEach((row, index) => {
+        const item = row.querySelector('.p-item').value, price = parseFloat(row.querySelector('.p-price').value) || 0, qty = parseInt(row.querySelector('.p-qty').value) || 0;
+        const bagCost = (index === 0) ? (bagQty * 0.2) : 0;
+        if(qty > 0) purchases.push({ batchId, date, item, qty, price, cost: (price * qty + bagCost).toFixed(2), bagQty: index === 0 ? bagQty : 0 });
+    });
+    
+    localStorage.setItem('v5_purchases', JSON.stringify(purchases));
+    cancelEdit();
+    alert(editBatchId ? '已成功更新修改' : '采购已存入');
+}
+
 function saveSales() {
-    const date = document.getElementById('sDate').value, orderId = document.getElementById('sOrderId').value || 'ID-'+Date.now(), batchId = Date.now();
+    const date = document.getElementById('sDate').value, orderId = document.getElementById('sOrderId').value || 'ID-'+Date.now(), batchId = editBatchId || Date.now();
+    const platform = document.getElementById('sPlatform').value;
     const coupon = parseFloat(document.getElementById('sTotalCoupon').value) || 0;
     const fee = parseFloat(document.getElementById('sTotalFee').value) || 0;
     const adjust = parseFloat(document.getElementById('sAdjustment').value) || 0;
     const rows = document.querySelectorAll('#sItemsContainer .item-row');
     
     if(!date || rows.length === 0) return alert('数据不能为空');
+
+    if(editBatchId) sales = sales.filter(s => s.batchId != editBatchId);
+
     rows.forEach(row => {
         const item = row.querySelector('.s-item').value, price = parseFloat(row.querySelector('.s-price').value) || 0, qty = parseInt(row.querySelector('.s-qty').value) || 0;
-        if(qty > 0) sales.push({ batchId, date, orderId, item, qty, unitAmount: price, amount: (price * qty).toFixed(2), coupon, fee, adjust });
+        if(qty > 0) sales.push({ batchId, date, orderId, platform, item, qty, unitAmount: price, amount: (price * qty).toFixed(2), coupon, fee, adjust });
     });
+    
     localStorage.setItem('v5_sales', JSON.stringify(sales));
-    document.getElementById('sItemsContainer').innerHTML = ''; 
-    document.getElementById('sTotalCoupon').value = 0; document.getElementById('sTotalFee').value = 0; document.getElementById('sAdjustment').value = 0;
-    alert('销售订单已入账');
+    cancelEdit();
+    alert(editBatchId ? '已成功更新修改' : '销售订单已入账');
 }
 
-// --- 历史 ---
+// --- 修改逻辑 ---
+function prepareEdit(bId, type) {
+    editBatchId = bId;
+    if(type === 'P') {
+        const batch = purchases.filter(p => p.batchId == bId);
+        showTab('purchase', document.querySelector('[onclick*="purchase"]'));
+        document.getElementById('pDate').value = batch[0].date;
+        document.getElementById('pBagCount').value = batch[0].bagQty;
+        document.getElementById('pItemsContainer').innerHTML = "";
+        batch.forEach(item => addPurchaseRow(item));
+        document.getElementById('pEditNotice').style.display = "block";
+        document.getElementById('btnSaveP').innerHTML = "确认更新修改";
+        document.getElementById('btnCancelP').style.display = "block";
+    } else {
+        const batch = sales.filter(s => s.batchId == bId);
+        showTab('sales', document.querySelector('[onclick*="sales"]'));
+        document.getElementById('sDate').value = batch[0].date;
+        document.getElementById('sOrderId').value = batch[0].orderId;
+        document.getElementById('sPlatform').value = batch[0].platform || 'Shopee';
+        document.getElementById('sTotalCoupon').value = batch[0].coupon;
+        document.getElementById('sTotalFee').value = batch[0].fee;
+        document.getElementById('sAdjustment').value = batch[0].adjust;
+        document.getElementById('sItemsContainer').innerHTML = "";
+        batch.forEach(item => addSalesRow(item));
+        document.getElementById('sEditNotice').style.display = "block";
+        document.getElementById('btnSaveS').innerHTML = "确认更新修改";
+        document.getElementById('btnCancelS').style.display = "block";
+    }
+    window.scrollTo(0,0);
+}
+
+function cancelEdit() {
+    editBatchId = null;
+    document.querySelectorAll('.edit-mode-notice').forEach(n => n.style.display = "none");
+    document.getElementById('btnSaveP').innerHTML = "保存整笔采购";
+    document.getElementById('btnSaveS').innerHTML = "确认结单";
+    document.getElementById('btnCancelP').style.display = "none";
+    document.getElementById('btnCancelS').style.display = "none";
+    document.getElementById('pItemsContainer').innerHTML = "";
+    document.getElementById('sItemsContainer').innerHTML = "";
+    document.getElementById('pBagCount').value = 0;
+    document.getElementById('sTotalCoupon').value = 0;
+    document.getElementById('sTotalFee').value = 0;
+    document.getElementById('sAdjustment').value = 0;
+    addPurchaseRow(); addSalesRow();
+}
+
+// --- 历史渲染 (增加修改按钮 & 平台展示) ---
 function renderHistory() {
     const list = document.getElementById('historyList'), isP = document.getElementById('histP').checked, data = isP ? purchases : sales;
     list.innerHTML = '';
@@ -234,19 +313,20 @@ function renderHistory() {
         Object.keys(batches).sort((a,b) => b-a).forEach(bId => {
             const items = batches[bId], first = items[0];
             let sub = items.reduce((s, i) => s + parseFloat(isP ? i.cost : i.amount), 0);
-            let final = isP ? sub : (sub - first.coupon - first.fee + first.adjust);
+            let final = isP ? sub : (sub - (first.coupon||0) - (first.fee||0) + (first.adjust||0));
             contentDiv.innerHTML += `
                 <div class="history-card ${isP?'border-primary':'border-success'} shadow-sm">
                     <div class="d-flex justify-content-between small fw-bold border-bottom mb-2 pb-1">
-                        <span>${first.date}</span><span class="${isP?'text-primary':'text-success'}">RM ${final.toFixed(2)}</span>
+                        <span>${first.date} ${!isP?`[${first.platform||'Shopee'}]`:''}</span><span class="${isP?'text-primary':'text-success'}">RM ${final.toFixed(2)}</span>
                     </div>
                     <div class="small text-muted mb-2">
                         ${!isP ? `单号: ${first.orderId}<br>` : ''}
-                        ${items.map(i => `· ${i.item} x ${i.qty} (RM${isP?i.cost:i.amount})`).join('<br>')}
-                        ${isP && first.bagQty > 0 ? `<div class="text-primary mt-1 small">纸袋数量: ${first.bagQty} (RM ${(first.bagQty*0.2).toFixed(2)})</div>` : ''}
-                        ${!isP && (first.coupon>0||first.fee>0||first.adjust!=0) ? `<div class="text-danger mt-1 small">优惠:-${first.coupon} | 费:-${first.fee} | 调整:+${first.adjust}</div>` : ''}
+                        ${items.map(i => `· ${i.item} x ${i.qty}`).join('<br>')}
                     </div>
-                    <button class="btn btn-sm btn-link text-danger p-0" style="font-size:11px" onclick="deleteBatch('${bId}', ${isP})">删除记录</button>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-warning flex-grow-1" style="font-size:11px" onclick="prepareEdit('${bId}', '${isP?'P':'S'}')">修改记录</button>
+                        <button class="btn btn-sm btn-outline-danger flex-grow-1" style="font-size:11px" onclick="deleteBatch('${bId}', ${isP})">删除记录</button>
+                    </div>
                 </div>`;
         });
         list.appendChild(monthDiv);
@@ -261,12 +341,11 @@ function deleteBatch(id, isP) {
     renderHistory();
 }
 
-// --- 库存 ---
+// --- 库存逻辑 ---
 function renderInventory() {
     const y = parseInt(document.getElementById('filterYear').value), m = document.getElementById('filterMonth').value, tbody = document.getElementById('inventoryTable');
     tbody.innerHTML = '';
-    const start = new Date(y, m === 'all' ? 0 : parseInt(m), 1);
-    const end = m === 'all' ? new Date(y + 1, 0, 1) : new Date(y, parseInt(m) + 1, 1);
+    const start = new Date(y, m === 'all' ? 0 : parseInt(m), 1), end = m === 'all' ? new Date(y + 1, 0, 1) : new Date(y, parseInt(m) + 1, 1);
     products.forEach(name => {
         const hIn = purchases.filter(p => p.item === name && new Date(p.date) < start).reduce((s, p) => s + p.qty, 0);
         const hOut = sales.filter(s => s.item === name && new Date(s.date) < start).reduce((s, s1) => s + s1.qty, 0);
@@ -282,20 +361,20 @@ function editInitial(name) {
     if(val !== null) { initialStock[name] = parseInt(val) || 0; localStorage.setItem('v5_initialStock', JSON.stringify(initialStock)); renderInventory(); }
 }
 
-// --- 备份 ---
+// --- 备份导出 ---
 function exportType(type) {
     let csv = "\uFEFF";
     if (type === 'purchase') {
         csv += "日期,货品,单价,数量,总计,纸袋数\n";
         purchases.forEach(p => csv += `${p.date},${p.item},${p.price},${p.qty},${p.cost},${p.bagQty}\n`);
     } else if (type === 'sales') {
-        csv += "日期,单号,货品,数量,单价,小计,优惠,手续费,平台调整\n";
-        sales.forEach(s => csv += `${s.date},${s.orderId},${s.item},${s.qty},${s.unitAmount},${s.amount},${s.coupon},${s.fee},${s.adjust}\n`);
+        csv += "日期,平台,单号,货品,数量,单价,小计,优惠,手续费,平台调整\n";
+        sales.forEach(s => csv += `${s.date},${s.platform||'Shopee'},${s.orderId},${s.item},${s.qty},${s.unitAmount},${s.amount},${s.coupon},${s.fee},${s.adjust}\n`);
     } else {
-        csv += "SECTION,DATA1,DATA2,DATA3,DATA4,DATA5,DATA6,DATA7,BATCHID\n";
+        csv += "SECTION,DATA1,DATA2,DATA3,DATA4,DATA5,DATA6,DATA7,BATCHID,DATA9\n";
         Object.keys(initialStock).forEach(k => csv += `INIT,${k},${initialStock[k]},,,,,,,\n`);
         purchases.forEach(p => csv += `PURCHASE,${p.date},${p.item},${p.qty},${p.price},${p.cost},${p.bagQty},,${p.batchId}\n`);
-        sales.forEach(s => csv += `SALE,${s.date},${s.orderId},${s.item},${s.qty},${s.amount},${s.coupon},${s.fee},${s.batchId},${s.adjust}\n`);
+        sales.forEach(s => csv += `SALE,${s.date},${s.orderId},${s.item},${s.qty},${s.amount},${s.coupon},${s.fee},${s.batchId},${s.adjust},${s.platform}\n`);
     }
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); link.download = `备份_${type}.csv`; link.click();
 }
@@ -311,7 +390,7 @@ function importData(input) {
             const c = line.split(','); const type = c[0];
             if(type === 'INIT') initialStock[c[1]] = parseInt(c[2]);
             if(type === 'PURCHASE') purchases.push({date:c[1], item:c[2], qty:parseInt(c[3]), price:parseFloat(c[4]), cost:c[5], bagQty:parseInt(c[6]), batchId:c[8]||Date.now()});
-            if(type === 'SALE') sales.push({date:c[1], orderId:c[2], item:c[3], qty:parseInt(c[4]), amount:parseFloat(c[5]), coupon:parseFloat(c[6]), fee:parseFloat(c[7]), batchId:c[8]||Date.now(), adjust:parseFloat(c[9]||0)});
+            if(type === 'SALE') sales.push({date:c[1], orderId:c[2], item:c[3], qty:parseInt(c[4]), amount:parseFloat(c[5]), coupon:parseFloat(c[6]), fee:parseFloat(c[7]), batchId:c[8]||Date.now(), adjust:parseFloat(c[9]||0), platform:c[10]});
         });
         localStorage.setItem('v5_purchases', JSON.stringify(purchases));
         localStorage.setItem('v5_sales', JSON.stringify(sales));
