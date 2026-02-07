@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>库存管家 V12 - 平台管理版</title>
+    <title>库存管家 V13 - 备份修复版</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root { --safe-area-inset-bottom: env(safe-area-inset-bottom); }
@@ -35,7 +35,7 @@
 
 <nav class="navbar navbar-expand navbar-dark bg-dark sticky-top">
     <div class="container-fluid">
-        <span class="navbar-brand">库存管家 V12</span>
+        <span class="navbar-brand">库存管家 V13</span>
         <div class="navbar-nav ms-auto">
             <div class="dropdown">
                 <button class="btn btn-outline-info btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">导出</button>
@@ -43,7 +43,7 @@
                     <li><a class="dropdown-item" href="#" onclick="exportType('purchase')">导出采购清单</a></li>
                     <li><a class="dropdown-item" href="#" onclick="exportType('sales')">导出销售清单</a></li>
                     <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item" href="#" onclick="exportType('all')">全量数据备份</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="exportType('all')">全量数据备份 (用于导入)</a></li>
                 </ul>
             </div>
             <button class="btn btn-outline-warning btn-sm ms-2" onclick="document.getElementById('importFile').click()">导入</button>
@@ -82,7 +82,6 @@
                     <option value="TikTok">TikTok</option>
                     <option value="Lazada">Lazada</option>
                     <option value="Offline">线下销售</option>
-                    <option value="Others">其他</option>
                 </select>
             </div>
         </div>
@@ -139,13 +138,13 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+// --- 基础数据 ---
 const products = ["Keychain RM1", "Keychain RM2", "Keychain RM3", "Plush RM1", "Plush RM2", "Plush RM3", "Plush RM5", "Plush RM10", "Plush RM15", "Plush RM20", "Figurine & Toy RM3", "Figurine & Toy RM6", "Figurine & Toy RM10", "Figurine & Toy RM15", "Stationary RM0.6", "Stationary RM1", "Stationary RM2", "Stationary RM3", "Handkechief RM1", "Handkechief RM2", "Handkechief RM3", "Bag RM1", "Bag RM2", "Bag RM3", "Bag RM6", "Others RM3", "Others RM6"];
 
 let purchases = JSON.parse(localStorage.getItem('v5_purchases')) || [];
 let sales = JSON.parse(localStorage.getItem('v5_sales')) || [];
 let initialStock = JSON.parse(localStorage.getItem('v5_initialStock')) || {};
-
-let editBatchId = null; // 正在编辑的ID
+let editBatchId = null;
 
 function extractPrice(name) {
     const match = name.match(/RM([\d.]+)/);
@@ -161,13 +160,12 @@ function showTab(id, el) {
     if(id === 'history') renderHistory();
 }
 
-// --- 通用行生成 ---
+// --- 动态行 ---
 function addPurchaseRow(data = null) {
     const id = Date.now() + Math.random();
     const item = data ? data.item : products[0];
     const price = data ? data.price : extractPrice(item);
     const qty = data ? data.qty : "";
-    
     document.getElementById('pItemsContainer').insertAdjacentHTML('beforeend', `
         <div class="item-row card" id="pRow_${id}">
             <button class="btn btn-remove" onclick="this.parentElement.remove()">✕</button>
@@ -186,7 +184,6 @@ function addSalesRow(data = null) {
     const item = data ? data.item : products[0];
     const price = data ? data.unitAmount : extractPrice(item);
     const qty = data ? data.qty : "";
-
     document.getElementById('sItemsContainer').insertAdjacentHTML('beforeend', `
         <div class="item-row sales-row card" id="sRow_${id}">
             <button class="btn btn-remove" onclick="this.parentElement.remove()">✕</button>
@@ -200,217 +197,141 @@ function addSalesRow(data = null) {
         </div>`);
 }
 
-// --- 保存/更新逻辑 ---
+// --- 业务逻辑 ---
 function savePurchase() {
-    const date = document.getElementById('pDate').value, batchId = editBatchId || Date.now(), rows = document.querySelectorAll('#pItemsContainer .item-row');
-    const bagQty = parseInt(document.getElementById('pBagCount').value) || 0;
-    if(!date || rows.length === 0) return alert('日期或商品不能为空');
-    
-    // 如果是编辑模式，先删除旧数据
+    const date = document.getElementById('pDate').value, bId = editBatchId || Date.now(), rows = document.querySelectorAll('#pItemsContainer .item-row'), bag = parseInt(document.getElementById('pBagCount').value) || 0;
+    if(!date || rows.length === 0) return alert('必填');
     if(editBatchId) purchases = purchases.filter(p => p.batchId != editBatchId);
-    
-    rows.forEach((row, index) => {
-        const item = row.querySelector('.p-item').value, price = parseFloat(row.querySelector('.p-price').value) || 0, qty = parseInt(row.querySelector('.p-qty').value) || 0;
-        const bagCost = (index === 0) ? (bagQty * 0.2) : 0;
-        if(qty > 0) purchases.push({ batchId, date, item, qty, price, cost: (price * qty + bagCost).toFixed(2), bagQty: index === 0 ? bagQty : 0 });
+    rows.forEach((row, idx) => {
+        const item = row.querySelector('.p-item').value, pr = parseFloat(row.querySelector('.p-price').value)||0, q = parseInt(row.querySelector('.p-qty').value)||0;
+        const bCost = (idx === 0) ? (bag * 0.2) : 0;
+        if(q > 0) purchases.push({ batchId: bId, date, item, qty: q, price: pr, cost: (pr * q + bCost).toFixed(2), bagQty: idx === 0 ? bag : 0 });
     });
-    
     localStorage.setItem('v5_purchases', JSON.stringify(purchases));
-    cancelEdit();
-    alert(editBatchId ? '已成功更新修改' : '采购已存入');
+    cancelEdit(); renderHistory(); alert('完成');
 }
 
 function saveSales() {
-    const date = document.getElementById('sDate').value, orderId = document.getElementById('sOrderId').value || 'ID-'+Date.now(), batchId = editBatchId || Date.now();
-    const platform = document.getElementById('sPlatform').value;
-    const coupon = parseFloat(document.getElementById('sTotalCoupon').value) || 0;
-    const fee = parseFloat(document.getElementById('sTotalFee').value) || 0;
-    const adjust = parseFloat(document.getElementById('sAdjustment').value) || 0;
+    const date = document.getElementById('sDate').value, orderId = document.getElementById('sOrderId').value || 'ID-'+Date.now(), bId = editBatchId || Date.now(), plat = document.getElementById('sPlatform').value, cp = parseFloat(document.getElementById('sTotalCoupon').value)||0, fe = parseFloat(document.getElementById('sTotalFee').value)||0, adj = parseFloat(document.getElementById('sAdjustment').value)||0;
     const rows = document.querySelectorAll('#sItemsContainer .item-row');
-    
-    if(!date || rows.length === 0) return alert('数据不能为空');
-
+    if(!date || rows.length === 0) return alert('必填');
     if(editBatchId) sales = sales.filter(s => s.batchId != editBatchId);
-
     rows.forEach(row => {
-        const item = row.querySelector('.s-item').value, price = parseFloat(row.querySelector('.s-price').value) || 0, qty = parseInt(row.querySelector('.s-qty').value) || 0;
-        if(qty > 0) sales.push({ batchId, date, orderId, platform, item, qty, unitAmount: price, amount: (price * qty).toFixed(2), coupon, fee, adjust });
+        const item = row.querySelector('.s-item').value, pr = parseFloat(row.querySelector('.s-price').value)||0, q = parseInt(row.querySelector('.s-qty').value)||0;
+        if(q > 0) sales.push({ batchId: bId, date, orderId, platform: plat, item, qty: q, unitAmount: pr, amount: (pr * q).toFixed(2), coupon: cp, fee: fe, adjust: adj });
     });
-    
     localStorage.setItem('v5_sales', JSON.stringify(sales));
-    cancelEdit();
-    alert(editBatchId ? '已成功更新修改' : '销售订单已入账');
+    cancelEdit(); renderHistory(); alert('完成');
 }
 
-// --- 修改逻辑 ---
+// --- 修改与历史 ---
 function prepareEdit(bId, type) {
     editBatchId = bId;
     if(type === 'P') {
-        const batch = purchases.filter(p => p.batchId == bId);
+        const bt = purchases.filter(p => p.batchId == bId);
         showTab('purchase', document.querySelector('[onclick*="purchase"]'));
-        document.getElementById('pDate').value = batch[0].date;
-        document.getElementById('pBagCount').value = batch[0].bagQty;
-        document.getElementById('pItemsContainer').innerHTML = "";
-        batch.forEach(item => addPurchaseRow(item));
-        document.getElementById('pEditNotice').style.display = "block";
-        document.getElementById('btnSaveP').innerHTML = "确认更新修改";
-        document.getElementById('btnCancelP').style.display = "block";
+        document.getElementById('pDate').value = bt[0].date; document.getElementById('pBagCount').value = bt[0].bagQty;
+        document.getElementById('pItemsContainer').innerHTML = ""; bt.forEach(i => addPurchaseRow(i));
+        document.getElementById('pEditNotice').style.display = "block"; document.getElementById('btnSaveP').innerHTML = "确认更新"; document.getElementById('btnCancelP').style.display = "block";
     } else {
-        const batch = sales.filter(s => s.batchId == bId);
+        const bt = sales.filter(s => s.batchId == bId);
         showTab('sales', document.querySelector('[onclick*="sales"]'));
-        document.getElementById('sDate').value = batch[0].date;
-        document.getElementById('sOrderId').value = batch[0].orderId;
-        document.getElementById('sPlatform').value = batch[0].platform || 'Shopee';
-        document.getElementById('sTotalCoupon').value = batch[0].coupon;
-        document.getElementById('sTotalFee').value = batch[0].fee;
-        document.getElementById('sAdjustment').value = batch[0].adjust;
-        document.getElementById('sItemsContainer').innerHTML = "";
-        batch.forEach(item => addSalesRow(item));
-        document.getElementById('sEditNotice').style.display = "block";
-        document.getElementById('btnSaveS').innerHTML = "确认更新修改";
-        document.getElementById('btnCancelS').style.display = "block";
+        document.getElementById('sDate').value = bt[0].date; document.getElementById('sOrderId').value = bt[0].orderId; document.getElementById('sPlatform').value = bt[0].platform || 'Shopee';
+        document.getElementById('sTotalCoupon').value = bt[0].coupon; document.getElementById('sTotalFee').value = bt[0].fee; document.getElementById('sAdjustment').value = bt[0].adjust;
+        document.getElementById('sItemsContainer').innerHTML = ""; bt.forEach(i => addSalesRow(i));
+        document.getElementById('sEditNotice').style.display = "block"; document.getElementById('btnSaveS').innerHTML = "确认更新"; document.getElementById('btnCancelS').style.display = "block";
     }
     window.scrollTo(0,0);
 }
 
 function cancelEdit() {
-    editBatchId = null;
-    document.querySelectorAll('.edit-mode-notice').forEach(n => n.style.display = "none");
-    document.getElementById('btnSaveP').innerHTML = "保存整笔采购";
-    document.getElementById('btnSaveS').innerHTML = "确认结单";
-    document.getElementById('btnCancelP').style.display = "none";
-    document.getElementById('btnCancelS').style.display = "none";
-    document.getElementById('pItemsContainer').innerHTML = "";
-    document.getElementById('sItemsContainer').innerHTML = "";
-    document.getElementById('pBagCount').value = 0;
-    document.getElementById('sTotalCoupon').value = 0;
-    document.getElementById('sTotalFee').value = 0;
-    document.getElementById('sAdjustment').value = 0;
+    editBatchId = null; document.querySelectorAll('.edit-mode-notice').forEach(n => n.style.display = "none");
+    document.getElementById('btnSaveP').innerHTML = "保存整笔采购"; document.getElementById('btnSaveS').innerHTML = "确认结单";
+    document.getElementById('btnCancelP').style.display = "none"; document.getElementById('btnCancelS').style.display = "none";
+    document.getElementById('pItemsContainer').innerHTML = ""; document.getElementById('sItemsContainer').innerHTML = "";
+    document.getElementById('pBagCount').value = 0; document.getElementById('sTotalCoupon').value = 0; document.getElementById('sTotalFee').value = 0; document.getElementById('sAdjustment').value = 0;
     addPurchaseRow(); addSalesRow();
 }
 
-// --- 历史渲染 (增加修改按钮 & 平台展示) ---
 function renderHistory() {
-    const list = document.getElementById('historyList'), isP = document.getElementById('histP').checked, data = isP ? purchases : sales;
-    list.innerHTML = '';
-    const monthGroups = {};
-    data.forEach(item => {
-        const d = new Date(item.date), mKey = `${d.getFullYear()}年 ${d.getMonth() + 1}月`;
-        if(!monthGroups[mKey]) monthGroups[mKey] = {};
-        if(!monthGroups[mKey][item.batchId]) monthGroups[mKey][item.batchId] = [];
-        monthGroups[mKey][item.batchId].push(item);
-    });
-
-    Object.keys(monthGroups).sort((a,b) => {
-        const parse = (s) => { const [y, m] = s.replace('年','').replace('月','').split(' '); return parseInt(y)*12 + parseInt(m); };
-        return parse(b) - parse(a);
-    }).forEach(mKey => {
-        const monthDiv = document.createElement('div');
-        monthDiv.className = 'month-group';
-        monthDiv.innerHTML = `<div class="month-header" onclick="this.parentElement.classList.toggle('active')">${mKey}</div><div class="month-content"></div>`;
-        const contentDiv = monthDiv.querySelector('.month-content');
-        const batches = monthGroups[mKey];
-        Object.keys(batches).sort((a,b) => b-a).forEach(bId => {
-            const items = batches[bId], first = items[0];
-            let sub = items.reduce((s, i) => s + parseFloat(isP ? i.cost : i.amount), 0);
-            let final = isP ? sub : (sub - (first.coupon||0) - (first.fee||0) + (first.adjust||0));
-            contentDiv.innerHTML += `
-                <div class="history-card ${isP?'border-primary':'border-success'} shadow-sm">
-                    <div class="d-flex justify-content-between small fw-bold border-bottom mb-2 pb-1">
-                        <span>${first.date} ${!isP?`[${first.platform||'Shopee'}]`:''}</span><span class="${isP?'text-primary':'text-success'}">RM ${final.toFixed(2)}</span>
-                    </div>
-                    <div class="small text-muted mb-2">
-                        ${!isP ? `单号: ${first.orderId}<br>` : ''}
-                        ${items.map(i => `· ${i.item} x ${i.qty}`).join('<br>')}
-                    </div>
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-warning flex-grow-1" style="font-size:11px" onclick="prepareEdit('${bId}', '${isP?'P':'S'}')">修改记录</button>
-                        <button class="btn btn-sm btn-outline-danger flex-grow-1" style="font-size:11px" onclick="deleteBatch('${bId}', ${isP})">删除记录</button>
-                    </div>
-                </div>`;
+    const list = document.getElementById('historyList'), isP = document.getElementById('histP').checked, data = isP ? purchases : sales, groups = {};
+    list.innerHTML = ''; data.forEach(d => { const dt = new Date(d.date), mK = `${dt.getFullYear()}年 ${dt.getMonth()+1}月`; if(!groups[mK]) groups[mK] = {}; if(!groups[mK][d.batchId]) groups[mK][d.batchId] = []; groups[mK][d.batchId].push(d); });
+    Object.keys(groups).sort((a,b) => { const parse = s => { const [y,m] = s.replace('年','').replace('月','').split(' '); return parseInt(y)*12+parseInt(m); }; return parse(b)-parse(a); }).forEach(mK => {
+        const mDiv = document.createElement('div'); mDiv.className = 'month-group'; mDiv.innerHTML = `<div class="month-header" onclick="this.parentElement.classList.toggle('active')">${mK}</div><div class="month-content"></div>`;
+        const cDiv = mDiv.querySelector('.month-content'), bt = groups[mK];
+        Object.keys(bt).sort((a,b) => b-a).forEach(id => {
+            const its = bt[id], f = its[0]; let sub = its.reduce((s,i)=>s+parseFloat(isP?i.cost:i.amount), 0); let fin = isP?sub:(sub-f.coupon-f.fee+f.adjust);
+            cDiv.innerHTML += `<div class="history-card ${isP?'border-primary':'border-success'} shadow-sm"><div class="d-flex justify-content-between small fw-bold border-bottom mb-2 pb-1"><span>${f.date} ${!isP?`[${f.platform||'Shopee'}]`:''}</span><span class="${isP?'text-primary':'text-success'}">RM ${fin.toFixed(2)}</span></div><div class="small text-muted mb-2">${!isP?`单号:${f.orderId}<br>`:''}${its.map(i=>`· ${i.item} x ${i.qty}`).join('<br>')}</div><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-warning flex-grow-1" onclick="prepareEdit('${id}','${isP?'P':'S'}')">修改</button><button class="btn btn-sm btn-outline-danger flex-grow-1" onclick="deleteBatch('${id}',${isP})">删除</button></div></div>`;
         });
-        list.appendChild(monthDiv);
+        list.appendChild(mDiv);
     });
 }
 
-function deleteBatch(id, isP) {
-    if(!confirm("确定删除？")) return;
-    if(isP) purchases = purchases.filter(p => p.batchId != id);
-    else sales = sales.filter(s => s.batchId != id);
-    localStorage.setItem(isP ? 'v5_purchases' : 'v5_sales', JSON.stringify(isP ? purchases : sales));
-    renderHistory();
-}
+function deleteBatch(id, isP) { if(confirm("确定删除？")) { if(isP) purchases = purchases.filter(p=>p.batchId!=id); else sales = sales.filter(s=>s.batchId!=id); localStorage.setItem(isP?'v5_purchases':'v5_sales', JSON.stringify(isP?purchases:sales)); renderHistory(); } }
 
 // --- 库存逻辑 ---
 function renderInventory() {
     const y = parseInt(document.getElementById('filterYear').value), m = document.getElementById('filterMonth').value, tbody = document.getElementById('inventoryTable');
-    tbody.innerHTML = '';
-    const start = new Date(y, m === 'all' ? 0 : parseInt(m), 1), end = m === 'all' ? new Date(y + 1, 0, 1) : new Date(y, parseInt(m) + 1, 1);
+    tbody.innerHTML = ''; const start = new Date(y, m==='all'?0:parseInt(m), 1), end = m==='all'?new Date(y+1,0,1):new Date(y,parseInt(m)+1,1);
     products.forEach(name => {
-        const hIn = purchases.filter(p => p.item === name && new Date(p.date) < start).reduce((s, p) => s + p.qty, 0);
-        const hOut = sales.filter(s => s.item === name && new Date(s.date) < start).reduce((s, s1) => s + s1.qty, 0);
-        const open = (initialStock[name] || 0) + hIn - hOut;
-        const cIn = purchases.filter(p => { const d = new Date(p.date); return p.item === name && d >= start && d < end; }).reduce((s, p) => s + p.qty, 0);
-        const cOut = sales.filter(s => { const d = new Date(s.date); return s.item === name && d >= start && d < end; }).reduce((s, s1) => s + s1.qty, 0);
-        tbody.innerHTML += `<tr><td style="font-size:11px;">${name}</td><td class="text-center text-secondary">${open}</td><td class="text-center text-success">${cIn}</td><td class="text-center text-danger">${cOut}</td><td class="text-center fw-bold text-primary" onclick="editInitial('${name}')">${open + cIn - cOut}</td></tr>`;
+        const hIn = purchases.filter(p=>p.item===name && new Date(p.date)<start).reduce((s,p)=>s+p.qty, 0);
+        const hOut = sales.filter(s=>s.item===name && new Date(s.date)<start).reduce((s,s1)=>s+s1.qty, 0);
+        const open = (initialStock[name]||0) + hIn - hOut;
+        const cIn = purchases.filter(p=>{ const d=new Date(p.date); return p.item===name && d>=start && d<end; }).reduce((s,p)=>s+p.qty, 0);
+        const cOut = sales.filter(s=>{ const d=new Date(s.date); return s.item===name && d>=start && d<end; }).reduce((s,s1)=>s+s1.qty, 0);
+        tbody.innerHTML += `<tr><td style="font-size:11px;">${name}</td><td class="text-center text-secondary">${open}</td><td class="text-center text-success">${cIn}</td><td class="text-center text-danger">${cOut}</td><td class="text-center fw-bold text-primary" onclick="editInitial('${name}')">${open+cIn-cOut}</td></tr>`;
     });
 }
 
-function editInitial(name) {
-    const val = prompt(`设置 ${name} 原始初始结余:`, initialStock[name] || 0);
-    if(val !== null) { initialStock[name] = parseInt(val) || 0; localStorage.setItem('v5_initialStock', JSON.stringify(initialStock)); renderInventory(); }
-}
+function editInitial(name) { const val = prompt(`初始库存 ${name}:`, initialStock[name]||0); if(val!==null) { initialStock[name]=parseInt(val)||0; localStorage.setItem('v5_initialStock', JSON.stringify(initialStock)); renderInventory(); } }
 
-// --- 备份导出 ---
+// --- 备份导出/导入 (修复核心) ---
 function exportType(type) {
     let csv = "\uFEFF";
-    if (type === 'purchase') {
+    if(type === 'purchase') {
         csv += "日期,货品,单价,数量,总计,纸袋数\n";
         purchases.forEach(p => csv += `${p.date},${p.item},${p.price},${p.qty},${p.cost},${p.bagQty}\n`);
-    } else if (type === 'sales') {
-        csv += "日期,平台,单号,货品,数量,单价,小计,优惠,手续费,平台调整\n";
+    } else if(type === 'sales') {
+        csv += "日期,平台,单号,货品,数量,单价,小计,优惠,手续费,调整\n";
         sales.forEach(s => csv += `${s.date},${s.platform||'Shopee'},${s.orderId},${s.item},${s.qty},${s.unitAmount},${s.amount},${s.coupon},${s.fee},${s.adjust}\n`);
     } else {
-        csv += "SECTION,DATA1,DATA2,DATA3,DATA4,DATA5,DATA6,DATA7,BATCHID,DATA9\n";
-        Object.keys(initialStock).forEach(k => csv += `INIT,${k},${initialStock[k]},,,,,,,\n`);
-        purchases.forEach(p => csv += `PURCHASE,${p.date},${p.item},${p.qty},${p.price},${p.cost},${p.bagQty},,${p.batchId}\n`);
+        // 全量备份：类型(0), 字段1(1), 2(2), 3(3), 4(4), 5(5), 6(6), 7(7), 8(8), 9(9), 10(10)
+        csv += "TYPE,F1,F2,F3,F4,F5,F6,F7,BATCHID,ADJUST,PLATFORM\n";
+        Object.keys(initialStock).forEach(k => csv += `INIT,${k},${initialStock[k]},,,,,,,,\n`);
+        purchases.forEach(p => csv += `PURCHASE,${p.date},${p.item},${p.qty},${p.price},${p.cost},${p.bagQty},,${p.batchId},,\n`);
         sales.forEach(s => csv += `SALE,${s.date},${s.orderId},${s.item},${s.qty},${s.amount},${s.coupon},${s.fee},${s.batchId},${s.adjust},${s.platform}\n`);
     }
-    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); link.download = `备份_${type}.csv`; link.click();
+    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], {type:'text/csv;charset=utf-8'})); link.download = `备份_${new Date().getTime()}.csv`; link.click();
 }
 
 function importData(input) {
-    const file = input.files[0]; if(!file) return;
     const reader = new FileReader();
     reader.onload = function(e) {
-        const lines = e.target.result.split('\n'); if(!confirm("覆盖数据？")) return;
-        purchases = []; sales = []; initialStock = {};
-        lines.forEach((line, index) => {
-            if(index === 0 || !line.trim()) return;
-            const c = line.split(','); const type = c[0];
-            if(type === 'INIT') initialStock[c[1]] = parseInt(c[2]);
-            if(type === 'PURCHASE') purchases.push({date:c[1], item:c[2], qty:parseInt(c[3]), price:parseFloat(c[4]), cost:c[5], bagQty:parseInt(c[6]), batchId:c[8]||Date.now()});
-            if(type === 'SALE') sales.push({date:c[1], orderId:c[2], item:c[3], qty:parseInt(c[4]), amount:parseFloat(c[5]), coupon:parseFloat(c[6]), fee:parseFloat(c[7]), batchId:c[8]||Date.now(), adjust:parseFloat(c[9]||0), platform:c[10]});
+        const lines = e.target.result.split('\n'); if(!confirm("将覆盖当前数据，确定？")) return;
+        const newP = [], newS = [], newI = {};
+        lines.forEach((line, idx) => {
+            if(idx === 0 || !line.trim()) return;
+            const c = line.split(',').map(v => v.trim()); const type = c[0];
+            if(type === 'INIT') newI[c[1]] = parseInt(c[2]) || 0;
+            if(type === 'PURCHASE') newP.push({ date:c[1], item:c[2], qty:parseInt(c[3])||0, price:parseFloat(c[4])||0, cost:c[5], bagQty:parseInt(c[6])||0, batchId:c[8] });
+            if(type === 'SALE') newS.push({ date:c[1], orderId:c[2], item:c[3], qty:parseInt(c[4])||0, amount:c[5], coupon:parseFloat(c[6])||0, fee:parseFloat(c[7])||0, batchId:c[8], adjust:parseFloat(c[9]||0), platform:c[10] });
         });
+        purchases = newP; sales = newS; initialStock = newI;
         localStorage.setItem('v5_purchases', JSON.stringify(purchases));
         localStorage.setItem('v5_sales', JSON.stringify(sales));
         localStorage.setItem('v5_initialStock', JSON.stringify(initialStock));
         location.reload();
     };
-    reader.readAsText(file);
+    if(input.files[0]) reader.readAsText(input.files[0]);
 }
 
 window.onload = function() {
-    const now = new Date();
-    document.getElementById('pDate').valueAsDate = now; document.getElementById('sDate').valueAsDate = now;
+    const now = new Date(); document.getElementById('pDate').valueAsDate = now; document.getElementById('sDate').valueAsDate = now;
     const ySel = document.getElementById('filterYear'), curY = now.getFullYear();
-    for(let y = 2024; y <= curY + 5; y++) ySel.options.add(new Option(y + "年", y));
-    ySel.value = curY;
-    const mSel = document.getElementById('filterMonth');
-    mSel.options.add(new Option("全年实时", "all"));
+    for(let y=2024; y<=curY+5; y++) ySel.options.add(new Option(y+"年", y));
+    ySel.value = curY; const mSel = document.getElementById('filterMonth'); mSel.options.add(new Option("全年实时", "all"));
     for(let m=0; m<12; m++) mSel.options.add(new Option((m+1)+"月", m));
-    mSel.value = now.getMonth();
-    addPurchaseRow(); addSalesRow();
+    mSel.value = now.getMonth(); addPurchaseRow(); addSalesRow();
 };
 </script>
 </body>
